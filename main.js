@@ -165,8 +165,8 @@ function loadCharacterModel() {
                 animations[IDLE] = mixer.clipAction(animation);
                 // Create a slightly modified version of idle for variation
                 animations[IDLE_ALT] = mixer.clipAction(animation);
-                animations[IDLE_ALT].setEffectiveTimeScale(0.8); // Slower version
-                animations[IDLE_ALT].setEffectiveWeight(0.9);
+                animations[IDLE_ALT].setEffectiveTimeScale(0.5); // Much slower for a more restful pose
+                animations[IDLE_ALT].setEffectiveWeight(0.7); // Reduce intensity of movement
             } else if (name.includes('walk')) {
                 animations[WALKING] = mixer.clipAction(animation);
             } else if (name.includes('run')) {
@@ -386,8 +386,8 @@ function createPlayer(clientId, data) {
                 playerAnimations[IDLE] = playerMixer.clipAction(animation);
                 // Create a slightly modified version of idle for variation
                 playerAnimations[IDLE_ALT] = playerMixer.clipAction(animation);
-                playerAnimations[IDLE_ALT].setEffectiveTimeScale(0.8); // Slower version
-                playerAnimations[IDLE_ALT].setEffectiveWeight(0.9);
+                playerAnimations[IDLE_ALT].setEffectiveTimeScale(0.5); // Match with main player's idle
+                playerAnimations[IDLE_ALT].setEffectiveWeight(0.7); // Reduce intensity
             } else if (name.includes('walk')) {
                 playerAnimations[WALKING] = playerMixer.clipAction(animation);
             } else if (name.includes('run')) {
@@ -614,8 +614,8 @@ function updateCharacterAnimation() {
     if (movement.forward || movement.backward || movement.left || movement.right) {
         newAnimation = movement.running ? RUNNING : WALKING;
     } else {
-        // Occasionally switch between idle animations for more natural movement
-        if (Math.random() > 0.98) { // Small chance to switch idle animations
+        // Occasionally switch between idle animations but much less frequently
+        if (Math.random() > 0.995) { // Very rare chance to switch idle animations
             newAnimation = newAnimation === IDLE ? IDLE_ALT : IDLE;
         }
     }
@@ -625,11 +625,11 @@ function updateCharacterAnimation() {
         animations[key].isRunning() && animations[key].weight === 1
     )) return;
     
-    // Transition to new animation
+    // Transition to new animation more gradually for idle animations
     Object.values(animations).forEach(anim => {
-        anim.fadeOut(0.2);
+        anim.fadeOut(newAnimation.includes('idle') ? 0.5 : 0.2);
     });
-    animations[newAnimation].reset().fadeIn(0.2).play();
+    animations[newAnimation].reset().fadeIn(newAnimation.includes('idle') ? 0.5 : 0.2).play();
 }
 
 function moveCharacter(delta) {
@@ -743,10 +743,10 @@ function animate() {
     if (document.activeElement !== document.getElementById('chat-input')) {
         moveCharacter(delta);
         
-        // Occasionally switch between idle animations when standing still
+        // Reduce frequency of idle animation switching
         if (!movement.forward && !movement.backward && !movement.left && !movement.right) {
-            // Add subtle idle animation variation
-            if (Math.random() > 0.995) { // Very rare chance to switch idle animations
+            // Add subtle idle animation variation very rarely
+            if (Math.random() > 0.998) { // Even more rare chance to switch idle animations
                 updateCharacterAnimation();
                 updatePresence(); // Update other clients about our animation state
             }
