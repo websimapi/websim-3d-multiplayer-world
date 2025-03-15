@@ -1,10 +1,14 @@
-import { getCamera } from './scene.js';
-import { currentPlayerModel } from './main.js';
-import { controls } from './main.js';
+import { getCamera, getScene } from './scene.js';
+import { getCurrentPlayerModel } from './character.js';
 
 const cameraFollowDistance = 4;
 const cameraHeight = 1.8;
 let _isFirstPerson = false;
+let controls;
+
+export function setControls(controlsInstance) {
+    controls = controlsInstance;
+}
 
 export function isFirstPerson() {
     return _isFirstPerson;
@@ -12,13 +16,14 @@ export function isFirstPerson() {
 
 export function toggleCameraView() {
     const camera = getCamera();
-    if (!camera) return;
+    const currentPlayerModel = getCurrentPlayerModel();
+    if (!camera || !currentPlayerModel) return;
     
     _isFirstPerson = !_isFirstPerson;
     
     if (_isFirstPerson) {
         // Switch to first person
-        controls.enabled = false;
+        if (controls) controls.enabled = false;
         // Hide player model head
         currentPlayerModel.traverse(node => {
             if (node.isMesh && (node.name.includes('Head') || node.name.includes('head'))) {
@@ -27,7 +32,7 @@ export function toggleCameraView() {
         });
     } else {
         // Switch back to third person
-        controls.enabled = false;
+        if (controls) controls.enabled = false;
         // Show all parts of the model
         currentPlayerModel.traverse(node => {
             if (node.isMesh) {

@@ -62,6 +62,11 @@ export function initScene(room) {
     controls.minDistance = 2;
     controls.maxDistance = 10;
     
+    // Make controls available to camera module
+    import('./camera.js').then(cameraModule => {
+        cameraModule.setControls(controls);
+    });
+    
     // Create lighting
     createLights();
     
