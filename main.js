@@ -26,6 +26,8 @@ const RUNNING = 'running';
 const movementSpeed = 5;
 const runningSpeed = 10;
 const rotationSpeed = 3;
+const cameraFollowDistance = 4; // Distance behind player for third-person camera
+const cameraHeight = 1.8; // Height of camera in third-person mode
 let movement = {
     forward: false,
     backward: false,
@@ -223,13 +225,26 @@ function toggleCameraView() {
         });
     } else {
         // Switch back to third person
-        controls.enabled = true;
+        controls.enabled = false; // Disable orbit controls for third-person mode
         // Show all parts of the model
         currentPlayerModel.traverse(node => {
             if (node.isMesh) {
                 node.visible = true;
             }
         });
+        
+        // Set camera to behind player position
+        const playerRotation = currentPlayerModel.rotation.y;
+        camera.position.x = currentPlayerModel.position.x - Math.sin(playerRotation) * cameraFollowDistance;
+        camera.position.y = currentPlayerModel.position.y + cameraHeight;
+        camera.position.z = currentPlayerModel.position.z - Math.cos(playerRotation) * cameraFollowDistance;
+        
+        // Look at player
+        camera.lookAt(
+            currentPlayerModel.position.x,
+            currentPlayerModel.position.y + 1,
+            currentPlayerModel.position.z
+        );
     }
 }
 
@@ -277,7 +292,8 @@ function updatePresence() {
         position: { x: position.x, y: position.y, z: position.z },
         rotation: { y: rotation.y },
         animation: animationState,
-        timestamp: Date.now() // Add timestamp for smoother interpolation
+        timestamp: Date.now(),
+        isMoving: movement.forward || movement.backward || movement.left || movement.right
     });
 }
 
@@ -427,14 +443,13 @@ function updatePlayer(clientId, data) {
         });
     }
     
-    // Update animation if changed
+    // Update animation if changed - immediate transition for better sync
     if (data.animation && data.animation !== player.currentAnimation) {
-        const currentAnim = player.animations[player.currentAnimation];
-        const newAnim = player.animations[data.animation];
-        
-        if (currentAnim && newAnim) {
-            currentAnim.fadeOut(0.2);
-            newAnim.reset().fadeIn(0.2).play();
+        if (player.animations[player.currentAnimation]) {
+            player.animations[player.currentAnimation].fadeOut(0.1);
+        }
+        if (player.animations[data.animation]) {
+            player.animations[data.animation].reset().fadeIn(0.1).play();
             player.currentAnimation = data.animation;
         }
     }
@@ -623,8 +638,22 @@ function moveCharacter(delta) {
         moved = true;
     }
     
-    // Rotation for left/right in third person mode
-    if (!isFirstPerson) {
+    // Left/right strafing in first person or rotation in third person
+    if (isFirstPerson) {
+        // Strafe in first person
+        if (movement.left) {
+            currentPlayerModel.position.x += Math.sin(moveAngle - Math.PI/2) * speed * delta;
+            currentPlayerModel.position.z += Math.cos(moveAngle - Math.PI/2) * speed * delta;
+            moved = true;
+        } else if (movement.right) {
+            currentPlayerModel.position.x += Math.sin(moveAngle + Math.PI/2) * speed * delta;
+            currentPlayerModel.position.z += Math.cos(moveAngle + Math.PI/2) * speed * delta;
+            moved = true;
+        }
+        // Update model rotation to match camera direction
+        currentPlayerModel.rotation.y = moveAngle;
+    } else {
+        // Rotation in third person mode
         if (movement.left) {
             currentPlayerModel.rotation.y += rotationSpeed * delta;
             moved = true;
@@ -632,10 +661,6 @@ function moveCharacter(delta) {
             currentPlayerModel.rotation.y -= rotationSpeed * delta;
             moved = true;
         }
-    } else {
-        // In first person, rotate with mouse and update model rotation
-        currentPlayerModel.rotation.y = moveAngle;
-        moved = true;
     }
     
     // Update camera position based on view mode
@@ -653,7 +678,22 @@ function moveCharacter(delta) {
                 camera.position.z + Math.cos(moveAngle)
             );
         } else {
-            // Third person - update orbit controls
+            // Third person - position camera behind player
+            const playerRotation = currentPlayerModel.rotation.y;
+            
+            // Position camera behind player at fixed distance and height
+            camera.position.x = currentPlayerModel.position.x - Math.sin(playerRotation) * cameraFollowDistance;
+            camera.position.y = currentPlayerModel.position.y + cameraHeight;
+            camera.position.z = currentPlayerModel.position.z - Math.cos(playerRotation) * cameraFollowDistance;
+            
+            // Look at player
+            camera.lookAt(
+                currentPlayerModel.position.x,
+                currentPlayerModel.position.y + 1, // Look at upper body/head
+                currentPlayerModel.position.z
+            );
+            
+            // Update orbit controls target
             controls.target.copy(currentPlayerModel.position);
         }
         
@@ -674,8 +714,8 @@ function animate() {
     
     const delta = clock.getDelta();
     
-    // Update controls only in third person mode
-    if (!isFirstPerson) {
+    // Update controls only if enabled (only when pausing game or UI interactions)
+    if (controls.enabled) {
         controls.update();
     }
     
