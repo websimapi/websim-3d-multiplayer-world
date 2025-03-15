@@ -22,7 +22,7 @@ const IDLE = 'idle';
 const WALKING = 'walking';
 const RUNNING = 'running';
 const IDLE_ALT = 'idle_alt'; // Adding alternate idle animation for variety
-// Add an idle animation blending weight factor to make arms dangle more naturally
+const JUMPING = 'jumping'; // New jumping animation
 const IDLE_ARM_WEIGHT = 0.4;
 
 // Movement variables
@@ -31,12 +31,16 @@ const runningSpeed = 10;
 const rotationSpeed = 3;
 const cameraFollowDistance = 4; // Distance behind player for third-person camera
 const cameraHeight = 1.8; // Height of camera in third-person mode
+const jumpHeight = 2; // Maximum jump height
+const jumpDuration = 0.8; // Time to complete a jump cycle
 let movement = {
     forward: false,
     backward: false,
     left: false,
     right: false,
     running: false,
+    jumping: false,
+    jumpProgress: 0, // Progress of jump animation (0-1)
     hasMovementChanged: false // Track if movement state has changed
 };
 
@@ -175,6 +179,8 @@ function loadCharacterModel() {
                 animations[WALKING].setEffectiveTimeScale(1.2); // Slightly faster walking animation
             } else if (name.includes('run')) {
                 animations[RUNNING] = mixer.clipAction(animation);
+            } else if (name.includes('jump')) {
+                animations[JUMPING] = mixer.clipAction(animation);
             }
         });
         
@@ -190,6 +196,14 @@ function loadCharacterModel() {
         }
         if (!animations[RUNNING]) {
             animations[RUNNING] = mixer.clipAction(gltf.animations[2] || gltf.animations[1] || gltf.animations[0]);
+        }
+        if (!animations[JUMPING]) {
+            // Create jump animation from a running or idle animation if one doesn't exist
+            const baseAnim = gltf.animations.find(a => a.name.toLowerCase().includes('run')) || 
+                           gltf.animations.find(a => a.name.toLowerCase().includes('idle')) ||
+                           gltf.animations[0];
+            animations[JUMPING] = mixer.clipAction(baseAnim);
+            animations[JUMPING].setEffectiveTimeScale(1.5); // Faster for jump
         }
         
         // Initialize with a longer crossfade to idle for smoothness
@@ -287,7 +301,9 @@ function updatePresence() {
     
     // Get current animation state
     let animationState = IDLE;
-    if (movement.forward || movement.backward || movement.left || movement.right) {
+    if (movement.jumping) {
+        animationState = JUMPING;
+    } else if (movement.forward || movement.backward || movement.left || movement.right) {
         animationState = movement.running ? RUNNING : WALKING;
     }
     
@@ -296,7 +312,8 @@ function updatePresence() {
         rotation: { y: rotation.y },
         animation: animationState,
         timestamp: Date.now(),
-        isMoving: movement.forward || movement.backward || movement.left || movement.right
+        isMoving: movement.forward || movement.backward || movement.left || movement.right,
+        isJumping: movement.jumping
     });
 }
 
@@ -391,6 +408,8 @@ function createPlayer(clientId, data) {
                 playerAnimations[WALKING].setEffectiveTimeScale(1.2); // Slightly faster walking
             } else if (name.includes('run')) {
                 playerAnimations[RUNNING] = playerMixer.clipAction(animation);
+            } else if (name.includes('jump')) {
+                playerAnimations[JUMPING] = playerMixer.clipAction(animation);
             }
         });
         
@@ -404,6 +423,13 @@ function createPlayer(clientId, data) {
         }
         if (!playerAnimations[RUNNING]) {
             playerAnimations[RUNNING] = playerMixer.clipAction(gltf.animations[2] || gltf.animations[1] || gltf.animations[0]);
+        }
+        if (!playerAnimations[JUMPING]) {
+            const baseAnim = gltf.animations.find(a => a.name.toLowerCase().includes('run')) || 
+                           gltf.animations.find(a => a.name.toLowerCase().includes('idle')) ||
+                           gltf.animations[0];
+            playerAnimations[JUMPING] = playerMixer.clipAction(baseAnim);
+            playerAnimations[JUMPING].setEffectiveTimeScale(1.5); // Faster for jump
         }
         
         // Start with appropriate animation
@@ -585,6 +611,12 @@ function onKeyDown(event) {
         case 'ShiftRight':
             movement.running = true;
             break;
+        case 'Space':
+            if (!movement.jumping) {
+                movement.jumping = true;
+                movement.jumpProgress = 0;
+            }
+            break;
     }
     
     // Check if movement state has changed
@@ -662,7 +694,9 @@ function updateCharacterAnimation() {
     let newAnimation = IDLE;
     
     // Determine animation based on movement
-    if (movement.forward || movement.backward || movement.left || movement.right) {
+    if (movement.jumping) {
+        newAnimation = JUMPING;
+    } else if (movement.forward || movement.backward || movement.left || movement.right) {
         newAnimation = movement.running ? RUNNING : WALKING;
     } else {
         // Occasionally switch between idle animations but much less frequently
@@ -671,23 +705,27 @@ function updateCharacterAnimation() {
         }
     }
     
+    // Get current animation
+    const currentAnimation = Object.keys(animations).find(key => 
+        animations[key].isRunning() && animations[key].weight > 0.5
+    ) || IDLE;
+    
     // Skip if animation is already playing
-    if (newAnimation === Object.keys(animations).find(key => 
-        animations[key].isRunning() && animations[key].weight === 1
-    )) return;
+    if (newAnimation === currentAnimation) return;
     
     // Set different crossfade durations based on animation transition type
     let fadeOutDuration = 0.3;
     let fadeInDuration = 0.3;
     
-    // Specifically handle starting and stopping movement transitions
-    if (newAnimation.includes('idle')) {
+    // Handle specific animation transitions
+    if (newAnimation === JUMPING) {
+        fadeOutDuration = 0.1; // Very quick transition to jump
+        fadeInDuration = 0.1;
+    } else if (newAnimation.includes('idle')) {
         // When stopping (transition to idle)
         fadeOutDuration = 0.5; // Longer fade-out from movement
         fadeInDuration = 0.5; // Gradual transition to idle
-    } else if (Object.keys(animations).find(key => 
-        animations[key].isRunning() && animations[key].weight === 1
-    ).includes('idle')) {
+    } else if (currentAnimation.includes('idle')) {
         // When starting movement from idle
         fadeOutDuration = 0.2; // Quick fade from idle
         fadeInDuration = 0.15; // Very quick transition to movement
@@ -695,17 +733,21 @@ function updateCharacterAnimation() {
     
     // Transition to new animation with appropriate timing
     Object.values(animations).forEach(anim => {
-        anim.fadeOut(fadeOutDuration);
+        if (anim.isRunning()) {
+            anim.fadeOut(fadeOutDuration);
+        }
     });
     
     // Reset animation before playing to ensure it starts from the beginning
-    // This fixes the glitch where walking cycles don't start properly
     animations[newAnimation].reset();
     animations[newAnimation].fadeIn(fadeInDuration).play();
     
-    // Immediately apply special settings for idle animations to make arms dangle naturally
+    // Apply animation-specific settings
     if (newAnimation.includes('idle')) {
         animations[newAnimation].setEffectiveWeight(0.8); // Slightly reduce default movements
+    } else if (newAnimation === JUMPING) {
+        animations[newAnimation].setLoop(THREE.LoopOnce);
+        animations[newAnimation].clampWhenFinished = true;
     }
 }
 
@@ -714,6 +756,26 @@ function moveCharacter(delta) {
     
     let moved = false;
     const speed = movement.running ? runningSpeed : movementSpeed;
+    
+    // Handle jumping
+    if (movement.jumping) {
+        // Update jump progress
+        movement.jumpProgress += delta / jumpDuration;
+        
+        if (movement.jumpProgress >= 1) {
+            movement.jumping = false;
+            movement.jumpProgress = 0;
+            updateCharacterAnimation(); // Update animation when jump is complete
+        } else {
+            // Calculate jump height using sine curve for smooth up and down
+            const jumpCurve = Math.sin(movement.jumpProgress * Math.PI);
+            currentPlayerModel.position.y = jumpCurve * jumpHeight;
+            moved = true;
+        }
+    } else {
+        // Make sure character is on the ground when not jumping
+        currentPlayerModel.position.y = 0;
+    }
     
     // Calculate movement direction based on camera or character facing
     let moveAngle = currentPlayerModel.rotation.y;
@@ -821,14 +883,16 @@ function animate() {
         moveCharacter(delta);
         
         // Less frequent idle animation switching with more controlled timing
-        if (!movement.forward && !movement.backward && !movement.left && !movement.right) {
+        if (!movement.forward && !movement.backward && !movement.left && !movement.right && !movement.jumping) {
             // Add subtle idle animation variation very rarely
             if (Math.random() > 0.999) { // Even more rare chance to switch idle animations
                 const currentIdleAnimation = animations[IDLE].isRunning() && animations[IDLE].weight > 0.5 ? IDLE : IDLE_ALT;
                 const newIdleAnimation = currentIdleAnimation === IDLE ? IDLE_ALT : IDLE;
                 
                 // Longer, gentler crossfade between idle animations
-                animations[currentIdleAnimation].fadeOut(1.5);
+                if (animations[currentIdleAnimation].isRunning()) {
+                    animations[currentIdleAnimation].fadeOut(1.5);
+                }
                 animations[newIdleAnimation].reset().fadeIn(1.5).play();
                 
                 // Make sure the new idle animation has the right arm weight for natural dangling
@@ -838,6 +902,13 @@ function animate() {
                 
                 updatePresence(); // Update other clients about our animation state
             }
+        }
+        
+        // Handle end of jumping animation
+        if (movement.jumping && animations[JUMPING] && !animations[JUMPING].isRunning()) {
+            movement.jumping = false;
+            updateCharacterAnimation();
+            updatePresence();
         }
     }
     
