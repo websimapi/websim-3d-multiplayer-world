@@ -34,7 +34,8 @@ let movement = {
     backward: false,
     left: false,
     right: false,
-    running: false
+    running: false,
+    hasMovementChanged: false // Track if movement state has changed
 };
 
 // Player model URL
@@ -163,12 +164,13 @@ function loadCharacterModel() {
             const name = animation.name.toLowerCase();
             if (name.includes('idle')) {
                 animations[IDLE] = mixer.clipAction(animation);
-                // Create a slightly modified version of idle for variation
+                // Create a significantly modified version of idle for a more restful pose
                 animations[IDLE_ALT] = mixer.clipAction(animation);
-                animations[IDLE_ALT].setEffectiveTimeScale(0.5); // Much slower for a more restful pose
-                animations[IDLE_ALT].setEffectiveWeight(0.7); // Reduce intensity of movement
+                animations[IDLE_ALT].setEffectiveTimeScale(0.3); // Much slower for a more restful pose
+                animations[IDLE_ALT].setEffectiveWeight(0.5); // Reduce intensity of movement significantly
             } else if (name.includes('walk')) {
                 animations[WALKING] = mixer.clipAction(animation);
+                animations[WALKING].setEffectiveTimeScale(1.2); // Slightly faster walking animation
             } else if (name.includes('run')) {
                 animations[RUNNING] = mixer.clipAction(animation);
             }
@@ -180,21 +182,13 @@ function loadCharacterModel() {
         }
         if (!animations[WALKING]) {
             animations[WALKING] = mixer.clipAction(gltf.animations[1] || gltf.animations[0]);
+            animations[WALKING].setEffectiveTimeScale(1.2);
         }
         if (!animations[RUNNING]) {
             animations[RUNNING] = mixer.clipAction(gltf.animations[2] || gltf.animations[1] || gltf.animations[0]);
         }
         
-        // Add a camera position for first person view
-        const headBone = findHeadBone(currentPlayerModel);
-        if (headBone) {
-            const fpCameraPosition = new THREE.Object3D();
-            fpCameraPosition.position.set(0, 0.2, 0.1); // Slightly in front of head
-            headBone.add(fpCameraPosition);
-            currentPlayerModel.userData.fpCameraPosition = fpCameraPosition;
-        }
-        
-        // Start with idle animation
+        // Initialize with a longer crossfade to idle for smoothness
         animations[IDLE].play();
         
         // Add to scene and update presence
@@ -384,12 +378,13 @@ function createPlayer(clientId, data) {
             const name = animation.name.toLowerCase();
             if (name.includes('idle')) {
                 playerAnimations[IDLE] = playerMixer.clipAction(animation);
-                // Create a slightly modified version of idle for variation
+                // Create a significantly modified version of idle for a more restful pose
                 playerAnimations[IDLE_ALT] = playerMixer.clipAction(animation);
-                playerAnimations[IDLE_ALT].setEffectiveTimeScale(0.5); // Match with main player's idle
-                playerAnimations[IDLE_ALT].setEffectiveWeight(0.7); // Reduce intensity
+                playerAnimations[IDLE_ALT].setEffectiveTimeScale(0.3); // Slower for a more restful pose
+                playerAnimations[IDLE_ALT].setEffectiveWeight(0.5); // Reduce intensity significantly
             } else if (name.includes('walk')) {
                 playerAnimations[WALKING] = playerMixer.clipAction(animation);
+                playerAnimations[WALKING].setEffectiveTimeScale(1.2); // Slightly faster walking
             } else if (name.includes('run')) {
                 playerAnimations[RUNNING] = playerMixer.clipAction(animation);
             }
@@ -452,13 +447,17 @@ function updatePlayer(clientId, data) {
         });
     }
     
-    // Update animation if changed - immediate transition for better sync
+    // Update animation if changed - with custom crossfade durations for better transitions
     if (data.animation && data.animation !== player.currentAnimation) {
         if (player.animations[player.currentAnimation]) {
-            player.animations[player.currentAnimation].fadeOut(0.1);
+            // Use longer fade for transitions to/from idle
+            const fadeOutDuration = data.animation.includes('idle') ? 0.8 : 0.3;
+            player.animations[player.currentAnimation].fadeOut(fadeOutDuration);
         }
         if (player.animations[data.animation]) {
-            player.animations[data.animation].reset().fadeIn(0.1).play();
+            // Use longer fade for transitions to/from idle
+            const fadeInDuration = data.animation.includes('idle') ? 0.8 : 0.3;
+            player.animations[data.animation].reset().fadeIn(fadeInDuration).play();
             player.currentAnimation = data.animation;
         }
     }
@@ -540,6 +539,14 @@ function updateConnectedPlayers(peers) {
 }
 
 function onKeyDown(event) {
+    let previousMovementState = {
+        forward: movement.forward,
+        backward: movement.backward,
+        left: movement.left,
+        right: movement.right,
+        running: movement.running
+    };
+    
     switch (event.code) {
         case 'KeyW':
         case 'ArrowUp':
@@ -563,13 +570,29 @@ function onKeyDown(event) {
             break;
     }
     
+    // Check if movement state has changed
+    movement.hasMovementChanged = 
+        previousMovementState.forward !== movement.forward ||
+        previousMovementState.backward !== movement.backward ||
+        previousMovementState.left !== movement.left ||
+        previousMovementState.right !== movement.right ||
+        previousMovementState.running !== movement.running;
+    
     // Don't update animation if typing in chat
-    if (document.activeElement !== document.getElementById('chat-input')) {
+    if (document.activeElement !== document.getElementById('chat-input') && movement.hasMovementChanged) {
         updateCharacterAnimation();
     }
 }
 
 function onKeyUp(event) {
+    let previousMovementState = {
+        forward: movement.forward,
+        backward: movement.backward,
+        left: movement.left,
+        right: movement.right,
+        running: movement.running
+    };
+    
     switch (event.code) {
         case 'KeyW':
         case 'ArrowUp':
@@ -593,8 +616,16 @@ function onKeyUp(event) {
             break;
     }
     
+    // Check if movement state has changed
+    movement.hasMovementChanged = 
+        previousMovementState.forward !== movement.forward ||
+        previousMovementState.backward !== movement.backward ||
+        previousMovementState.left !== movement.left ||
+        previousMovementState.right !== movement.right ||
+        previousMovementState.running !== movement.running;
+    
     // Don't update animation if typing in chat
-    if (document.activeElement !== document.getElementById('chat-input')) {
+    if (document.activeElement !== document.getElementById('chat-input') && movement.hasMovementChanged) {
         updateCharacterAnimation();
         
         // Send an immediate presence update when stopping movement
@@ -615,7 +646,7 @@ function updateCharacterAnimation() {
         newAnimation = movement.running ? RUNNING : WALKING;
     } else {
         // Occasionally switch between idle animations but much less frequently
-        if (Math.random() > 0.995) { // Very rare chance to switch idle animations
+        if (Math.random() > 0.997) { // Very rare chance to switch idle animations
             newAnimation = newAnimation === IDLE ? IDLE_ALT : IDLE;
         }
     }
@@ -625,11 +656,26 @@ function updateCharacterAnimation() {
         animations[key].isRunning() && animations[key].weight === 1
     )) return;
     
-    // Transition to new animation more gradually for idle animations
+    // Set different crossfade durations based on animation type
+    const fadeOutDuration = newAnimation.includes('idle') ? 0.8 : 0.3;
+    const fadeInDuration = newAnimation.includes('idle') ? 0.8 : 0.3;
+    
+    // Transition to new animation with appropriate timing
     Object.values(animations).forEach(anim => {
-        anim.fadeOut(newAnimation.includes('idle') ? 0.5 : 0.2);
+        anim.fadeOut(fadeOutDuration);
     });
-    animations[newAnimation].reset().fadeIn(newAnimation.includes('idle') ? 0.5 : 0.2).play();
+    
+    // Use smoothened animation transitions
+    animations[newAnimation].reset().fadeIn(fadeInDuration).play();
+    
+    // Handle specific start/stop transitions better
+    if (!newAnimation.includes('idle') && !animations[newAnimation].isRunning()) {
+        // When starting to move, play immediately with faster transition
+        animations[newAnimation].reset().fadeIn(0.2).play();
+    } else if (newAnimation.includes('idle')) {
+        // When stopping, use longer crossfade for smoothness
+        animations[newAnimation].reset().fadeIn(0.8).play();
+    }
 }
 
 function moveCharacter(delta) {
@@ -743,11 +789,17 @@ function animate() {
     if (document.activeElement !== document.getElementById('chat-input')) {
         moveCharacter(delta);
         
-        // Reduce frequency of idle animation switching
+        // Less frequent idle animation switching with more controlled timing
         if (!movement.forward && !movement.backward && !movement.left && !movement.right) {
             // Add subtle idle animation variation very rarely
-            if (Math.random() > 0.998) { // Even more rare chance to switch idle animations
-                updateCharacterAnimation();
+            if (Math.random() > 0.999) { // Even more rare chance to switch idle animations
+                const currentIdleAnimation = animations[IDLE].isRunning() && animations[IDLE].weight > 0.5 ? IDLE : IDLE_ALT;
+                const newIdleAnimation = currentIdleAnimation === IDLE ? IDLE_ALT : IDLE;
+                
+                // Longer, gentler crossfade between idle animations
+                animations[currentIdleAnimation].fadeOut(1.5);
+                animations[newIdleAnimation].reset().fadeIn(1.5).play();
+                
                 updatePresence(); // Update other clients about our animation state
             }
         }
