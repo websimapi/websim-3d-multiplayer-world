@@ -22,6 +22,8 @@ const IDLE = 'idle';
 const WALKING = 'walking';
 const RUNNING = 'running';
 const IDLE_ALT = 'idle_alt'; // Adding alternate idle animation for variety
+// Add an idle animation blending weight factor to make arms dangle more naturally
+const IDLE_ARM_WEIGHT = 0.4;
 
 // Movement variables
 const movementSpeed = 5;
@@ -167,7 +169,7 @@ function loadCharacterModel() {
                 // Create a significantly modified version of idle for a more restful pose
                 animations[IDLE_ALT] = mixer.clipAction(animation);
                 animations[IDLE_ALT].setEffectiveTimeScale(0.3); // Much slower for a more restful pose
-                animations[IDLE_ALT].setEffectiveWeight(0.5); // Reduce intensity of movement significantly
+                animations[IDLE_ALT].setEffectiveWeight(IDLE_ARM_WEIGHT); // Reduce intensity to make arms dangle
             } else if (name.includes('walk')) {
                 animations[WALKING] = mixer.clipAction(animation);
                 animations[WALKING].setEffectiveTimeScale(1.2); // Slightly faster walking animation
@@ -179,6 +181,8 @@ function loadCharacterModel() {
         // If specific animations aren't found, use defaults
         if (!animations[IDLE]) {
             animations[IDLE] = mixer.clipAction(gltf.animations[0]);
+            // Modify idle animation to have more natural arm posture
+            animations[IDLE].setEffectiveWeight(0.8); // Slightly reduce default movements
         }
         if (!animations[WALKING]) {
             animations[WALKING] = mixer.clipAction(gltf.animations[1] || gltf.animations[0]);
@@ -381,7 +385,7 @@ function createPlayer(clientId, data) {
                 // Create a significantly modified version of idle for a more restful pose
                 playerAnimations[IDLE_ALT] = playerMixer.clipAction(animation);
                 playerAnimations[IDLE_ALT].setEffectiveTimeScale(0.3); // Slower for a more restful pose
-                playerAnimations[IDLE_ALT].setEffectiveWeight(0.5); // Reduce intensity significantly
+                playerAnimations[IDLE_ALT].setEffectiveWeight(IDLE_ARM_WEIGHT); // Reduce intensity for dangling arms
             } else if (name.includes('walk')) {
                 playerAnimations[WALKING] = playerMixer.clipAction(animation);
                 playerAnimations[WALKING].setEffectiveTimeScale(1.2); // Slightly faster walking
@@ -393,6 +397,7 @@ function createPlayer(clientId, data) {
         // If specific animations aren't found, use defaults
         if (!playerAnimations[IDLE]) {
             playerAnimations[IDLE] = playerMixer.clipAction(gltf.animations[0]);
+            playerAnimations[IDLE].setEffectiveWeight(0.8); // Slightly reduce default movements
         }
         if (!playerAnimations[WALKING]) {
             playerAnimations[WALKING] = playerMixer.clipAction(gltf.animations[1] || gltf.animations[0]);
@@ -450,13 +455,25 @@ function updatePlayer(clientId, data) {
     // Update animation if changed - with custom crossfade durations for better transitions
     if (data.animation && data.animation !== player.currentAnimation) {
         if (player.animations[player.currentAnimation]) {
-            // Use longer fade for transitions to/from idle
-            const fadeOutDuration = data.animation.includes('idle') ? 0.8 : 0.3;
+            // Use appropriate fade durations based on animation transition type
+            let fadeOutDuration = 0.3;
+            // Longer fade when transitioning from movement to idle (stopping)
+            if (player.currentAnimation.includes('walk') || player.currentAnimation.includes('run')) {
+                if (data.animation.includes('idle')) {
+                    fadeOutDuration = 0.5; // Smoother transition when stopping
+                }
+            }
             player.animations[player.currentAnimation].fadeOut(fadeOutDuration);
         }
         if (player.animations[data.animation]) {
-            // Use longer fade for transitions to/from idle
-            const fadeInDuration = data.animation.includes('idle') ? 0.8 : 0.3;
+            // Use appropriate fade durations based on animation transition type
+            let fadeInDuration = 0.3;
+            // Longer fade when transitioning from idle to movement (starting)
+            if (player.currentAnimation.includes('idle')) {
+                if (data.animation.includes('walk') || data.animation.includes('run')) {
+                    fadeInDuration = 0.15; // Quicker transition when starting movement
+                }
+            }
             player.animations[data.animation].reset().fadeIn(fadeInDuration).play();
             player.currentAnimation = data.animation;
         }
@@ -631,7 +648,10 @@ function onKeyUp(event) {
         // Send an immediate presence update when stopping movement
         // This ensures other players see the idle state change immediately
         if (!movement.forward && !movement.backward && !movement.left && !movement.right) {
-            updatePresence();
+            // Small delay before sending idle state to ensure animation has time to transition
+            setTimeout(() => {
+                updatePresence();
+            }, 50);
         }
     }
 }
@@ -656,25 +676,36 @@ function updateCharacterAnimation() {
         animations[key].isRunning() && animations[key].weight === 1
     )) return;
     
-    // Set different crossfade durations based on animation type
-    const fadeOutDuration = newAnimation.includes('idle') ? 0.8 : 0.3;
-    const fadeInDuration = newAnimation.includes('idle') ? 0.8 : 0.3;
+    // Set different crossfade durations based on animation transition type
+    let fadeOutDuration = 0.3;
+    let fadeInDuration = 0.3;
+    
+    // Specifically handle starting and stopping movement transitions
+    if (newAnimation.includes('idle')) {
+        // When stopping (transition to idle)
+        fadeOutDuration = 0.5; // Longer fade-out from movement
+        fadeInDuration = 0.5; // Gradual transition to idle
+    } else if (Object.keys(animations).find(key => 
+        animations[key].isRunning() && animations[key].weight === 1
+    ).includes('idle')) {
+        // When starting movement from idle
+        fadeOutDuration = 0.2; // Quick fade from idle
+        fadeInDuration = 0.15; // Very quick transition to movement
+    }
     
     // Transition to new animation with appropriate timing
     Object.values(animations).forEach(anim => {
         anim.fadeOut(fadeOutDuration);
     });
     
-    // Use smoothened animation transitions
-    animations[newAnimation].reset().fadeIn(fadeInDuration).play();
+    // Reset animation before playing to ensure it starts from the beginning
+    // This fixes the glitch where walking cycles don't start properly
+    animations[newAnimation].reset();
+    animations[newAnimation].fadeIn(fadeInDuration).play();
     
-    // Handle specific start/stop transitions better
-    if (!newAnimation.includes('idle') && !animations[newAnimation].isRunning()) {
-        // When starting to move, play immediately with faster transition
-        animations[newAnimation].reset().fadeIn(0.2).play();
-    } else if (newAnimation.includes('idle')) {
-        // When stopping, use longer crossfade for smoothness
-        animations[newAnimation].reset().fadeIn(0.8).play();
+    // Immediately apply special settings for idle animations to make arms dangle naturally
+    if (newAnimation.includes('idle')) {
+        animations[newAnimation].setEffectiveWeight(0.8); // Slightly reduce default movements
     }
 }
 
@@ -799,6 +830,11 @@ function animate() {
                 // Longer, gentler crossfade between idle animations
                 animations[currentIdleAnimation].fadeOut(1.5);
                 animations[newIdleAnimation].reset().fadeIn(1.5).play();
+                
+                // Make sure the new idle animation has the right arm weight for natural dangling
+                animations[newIdleAnimation].setEffectiveWeight(
+                    newIdleAnimation === IDLE_ALT ? IDLE_ARM_WEIGHT : 0.8
+                );
                 
                 updatePresence(); // Update other clients about our animation state
             }
