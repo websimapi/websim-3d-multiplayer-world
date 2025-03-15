@@ -53,12 +53,26 @@
             padding: 10px;
             border-radius: 5px;
         }
+        .controls-info {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
     <div id="scene-container"></div>
     <div id="player-info">Loading...</div>
     <div id="connected-players">Players: 0</div>
+    <div class="controls-info">
+        WASD: Move | Shift: Run | V: Toggle First/Third Person View | Enter: Send Chat
+    </div>
     <input type="text" id="chat-input" placeholder="Type to chat..." maxlength="50">
 
     <script type="module" src="main.js"></script>
