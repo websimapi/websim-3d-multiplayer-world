@@ -21,6 +21,7 @@ let isFirstPerson = false; // Track camera mode
 const IDLE = 'idle';
 const WALKING = 'walking';
 const RUNNING = 'running';
+const IDLE_ALT = 'idle_alt'; // Adding alternate idle animation for variety
 
 // Movement variables
 const movementSpeed = 5;
@@ -162,6 +163,10 @@ function loadCharacterModel() {
             const name = animation.name.toLowerCase();
             if (name.includes('idle')) {
                 animations[IDLE] = mixer.clipAction(animation);
+                // Create a slightly modified version of idle for variation
+                animations[IDLE_ALT] = mixer.clipAction(animation);
+                animations[IDLE_ALT].setEffectiveTimeScale(0.8); // Slower version
+                animations[IDLE_ALT].setEffectiveWeight(0.9);
             } else if (name.includes('walk')) {
                 animations[WALKING] = mixer.clipAction(animation);
             } else if (name.includes('run')) {
@@ -379,6 +384,10 @@ function createPlayer(clientId, data) {
             const name = animation.name.toLowerCase();
             if (name.includes('idle')) {
                 playerAnimations[IDLE] = playerMixer.clipAction(animation);
+                // Create a slightly modified version of idle for variation
+                playerAnimations[IDLE_ALT] = playerMixer.clipAction(animation);
+                playerAnimations[IDLE_ALT].setEffectiveTimeScale(0.8); // Slower version
+                playerAnimations[IDLE_ALT].setEffectiveWeight(0.9);
             } else if (name.includes('walk')) {
                 playerAnimations[WALKING] = playerMixer.clipAction(animation);
             } else if (name.includes('run')) {
@@ -587,6 +596,12 @@ function onKeyUp(event) {
     // Don't update animation if typing in chat
     if (document.activeElement !== document.getElementById('chat-input')) {
         updateCharacterAnimation();
+        
+        // Send an immediate presence update when stopping movement
+        // This ensures other players see the idle state change immediately
+        if (!movement.forward && !movement.backward && !movement.left && !movement.right) {
+            updatePresence();
+        }
     }
 }
 
@@ -598,6 +613,11 @@ function updateCharacterAnimation() {
     // Determine animation based on movement
     if (movement.forward || movement.backward || movement.left || movement.right) {
         newAnimation = movement.running ? RUNNING : WALKING;
+    } else {
+        // Occasionally switch between idle animations for more natural movement
+        if (Math.random() > 0.98) { // Small chance to switch idle animations
+            newAnimation = newAnimation === IDLE ? IDLE_ALT : IDLE;
+        }
     }
     
     // Skip if animation is already playing
@@ -722,6 +742,15 @@ function animate() {
     // Update character movement
     if (document.activeElement !== document.getElementById('chat-input')) {
         moveCharacter(delta);
+        
+        // Occasionally switch between idle animations when standing still
+        if (!movement.forward && !movement.backward && !movement.left && !movement.right) {
+            // Add subtle idle animation variation
+            if (Math.random() > 0.995) { // Very rare chance to switch idle animations
+                updateCharacterAnimation();
+                updatePresence(); // Update other clients about our animation state
+            }
+        }
     }
     
     // Update character animations
